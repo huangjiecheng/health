@@ -2,374 +2,443 @@ package main
 
 import (
 	"fmt"
+	"github.com/robfig/cron/v3"
 	"health/router"
-	"math/rand"
-	"net"
-	"reflect"
-	"sort"
-	"strconv"
+	"health/share"
+	"strings"
+	"sync"
 	"time"
 )
 
-var (
-	ip2one    = make(map[string]int64)
-	ip2second = make(map[string]int64)
-)
-
-type AffinityState struct {
-	ipCard string
-	ttl    int64
-	ipMap  map[string][]string
+type AffinityInfo struct {
+	CardIp       share.CardIp
+	IpCard       share.IpCard
+	UsedWeight   int64
+	Priority     int64
+	LastUsedTime int64
+	MapDemo      map[string]string
 }
 
-type cacheName string
-type cardIp string
+type TrafficRespByBlb struct {
+	Duration  float64                `json:"duration"`
+	DomainMap map[string]interface{} `json:"domain_map"`
+	Now       float64                `json:"now"`
+}
+type Source struct {
+	Parent TrafficDetail `json:"parent"`
+	Client TrafficDetail `json:"client"`
+}
 
-var cacheMap = make(map[cacheName][]cardIp)
+type TrafficDetail struct {
+	UpTraffic int64 `json:"up_traffic"`
+	UpBytes   int64 `json:"up_bytes"`
+	Traffic   int64 `json:"traffic"`
+	Bytes     int64 `json:"bytes"`
+}
 
-var affinityMgr = make(map[string][]*AffinityState)
+const (
+	coverViewCacheDelimiter      = "_:_"
+	minAffinityPriorityThreshold = int64(-15)
+)
 
-var affinityMgr2 = make(map[string][]AffinityState)
+var (
+	globalTraffic     sync.Map
+	globalAffinityMgr = make(map[string][]AffinityInfo, 0)
+	ip1               = AffinityInfo{
+		CardIp:     "ip1",
+		Priority:   0,
+		UsedWeight: 1,
+	}
+	ip2 = AffinityInfo{
+		CardIp:     "ip2",
+		Priority:   0,
+		UsedWeight: 0,
+	}
+	ip3 = AffinityInfo{
+		CardIp:     "ip3",
+		Priority:   0,
+		UsedWeight: 0,
+	}
+	ip4 = AffinityInfo{
+		CardIp:     "ip4",
+		Priority:   0,
+		UsedWeight: 0,
+	}
+)
+
+type (
+	StatisticResp struct {
+		Status int            `json:"status"`
+		Msg    string         `json:"msg"`
+		Data   *StatisticUnit `json:"data"`
+	}
+	StatisticUnit struct {
+		Outs       map[share.CardIp]OutIPUnit `json:"outs"`
+		Ins        map[share.CardIp]InIPUnit  `json:"ins"`
+		BackSrc    BackSrcUnit                `json:"back_src"`
+		BackClient BackClientUnit             `json:"back_client"`
+		Traffic    map[string]TrafficUnit     `json:"traffic"`
+	}
+
+	TrafficUnit struct {
+		Source StatUnit `json:"source"`
+		Parent StatUnit `json:"parent"`
+		Client StatUnit `json:"client"`
+	}
+
+	StatUnit struct {
+		CodeStat map[string]int64 `json:"codestat"`
+		Speed    int64            `json:"speed"`
+		Req      int64            `json:"req"`
+		Resp     int64            `json:"resp"`
+		AvgTime  float64          `json:"avg_time"`
+		AvgSize  int64            `json:"avg_size"`
+		Active   int64            `json:"active"`
+		HitStat  HitStat          `json:"hitstat"`
+	}
+
+	HitStat struct {
+		ParentHit     int64   `json:"parent-hit"`
+		Hit           int64   `json:"hit"`
+		MissRate      float64 `json:"miss_rate"`
+		ParentHitRate float64 `json:"parenthit_rate"`
+		HitRate       float64 `json:"hit_rate"`
+		Miss          int64   `json:"miss"`
+	}
+
+	OutIPUnit struct {
+		Success SuccessUnit `json:"success"`
+		Fail    FailUnit    `json:"fail"`
+		Speed   int64       `json:"speed"`
+	}
+
+	InIPUnit struct {
+		Success SuccessUnit `json:"success"`
+	}
+
+	SuccessUnit struct {
+		All  int64 `json:"all"`
+		Hit  int64 `json:"hit"`
+		Miss int64 `json:"miss"`
+	}
+
+	FailUnit struct {
+		All      int64            `json:"all"`
+		HttpCode map[string]int64 `json:"http_code"`
+	}
+
+	BackSrcUnit struct {
+		UpstreamRequest  int64 `json:"upstream_request"`
+		UpstreamResponse int64 `json:"upstream_response"`
+		BwIn             int64 `json:"bandwidth_in"`
+		Speed            int64 `json:"speed"`
+	}
+
+	BackClientUnit struct {
+		Time           int64   `json:"time"`             //更新时间 秒级
+		Active         int64   `json:"active"`           //当前请求数
+		Speed          int64   `json:"speed"`            //软件下载速度 Bps
+		LogSpeed       int64   `json:"log_speed"`        //日志下载速度 Bps
+		AvgSize        int64   `json:"avg_size"`         //日志下载速度 Bps
+		SlowRespNum    int64   `json:"slow_resp_num"`    // 1分钟内响应次数
+		SlowSpeedRatio float64 `json:"slow_speed_ratio"` // 1分钟内慢速比
+	}
+)
+type TrafficInfo struct {
+	Traffic    int64 `json:"traffic"`
+	HitCount   int64 `json:"hit_count"`
+	MissCount  int64 `json:"miss_count"`
+	TotalCount int64 `json:"total_count"`
+}
+type Adapter struct {
+	Option Option
+	Info   Info
+}
+type Info struct {
+	CurrentRound   int64   `json:"current_round"`
+	PacketLostRate float64 `json:"packet_lost_rate"`
+}
+
+type Option struct {
+	Switch            bool
+	Period            int
+	SilentRoundNumber int
+	MajorCover        share.CoverName
+}
+
+type bandwidthCell struct {
+	Out    int64            `json:"out"`
+	In     int64            `json:"in"`
+	IPv4   share.CardIp     `json:"ip"`
+	IPv6   share.CardIp     `json:"ipv6"`
+	IpList []*bandwidthCell `json:"ipList"`
+}
+type IpBasic struct {
+	Priority string
+	SNode    string
+	Ip       string
+}
+
+func (ib IpBasic) IsOk() bool {
+	return ib.Ip != "" && ib.SNode != ""
+}
 
 func main() {
-	//testFunc()
-	//testFunc2()
-	//testFunc3()
-	//testFunc4()
-	//testFunc5()
-	//testFunc6()
-	fmt.Printf("时间1111：%s\n", time.Now().Format("2006-01-02 15:04:05"))
-	fmt.Printf("时间2222：%s\n", time.Now().UTC())
-
+	//aaa := make(map[share.CoverName]map[share.CardIp]*IpBasic, 0)
+	//funxxx(aaa)
+	//newAffinityMgr := make(map[string][]AffinityInfo, 0) // 当前轮的亲和性列表
+	//newAffinityMgr["cover1_:_view1_:_cache1"] = append(newAffinityMgr["cover1_:_view1_:_cache1"], ip1)
+	//integrateAffinity(newAffinityMgr)
+	c := cron.New(cron.WithSeconds())
+	_, _ = c.AddFunc("*/5 * * * * *", func() {
+		fmt.Printf("时间： %d, 准确: %s\n", time.Now().Unix(), time.Now().String())
+		fmt.Printf("五分钟前的时间：%d\n", ((time.Now().Unix()/60)-5)*60)
+	})
+	c.Start()
 	router.Init()
 }
 
-func testFunc6() {
-	temp := make([]*AffinityState, 0, 3)
-
-	aa := &AffinityState{
-		ipCard: "9.9.9.9",
-		ttl:    3,
+func funxxx(aaa map[share.CoverName]map[share.CardIp]*IpBasic) {
+	ddd := make(map[share.CardIp]*IpBasic)
+	ddd[share.CardIp("dsada")] = &IpBasic{
+		Ip: "1.1.1.1",
 	}
-	bb := &AffinityState{
-		ipCard: "2.2.2.2",
-		ttl:    3,
-	}
-	cc := &AffinityState{
-		ipCard: "5.5.5.5",
-		ttl:    3,
-	}
-	temp = append(temp, aa, bb, cc)
-
-	ipStr := "127.0.0.1"
-	ip := net.ParseIP(ipStr)
-	if ipv4 := ip.To4(); ipv4 != nil {
-		// 就是ipv6
-	}
-	//tf1(temp)
-	//tf2(temp)
-
-	for _, cacheGroupInfo := range temp {
-		ee := fmt.Sprintf("aaaa%+v", *cacheGroupInfo)
-		fmt.Printf(ee)
-	}
-	ff := fmt.Sprintf("kkkkk %+v", temp)
-	fmt.Printf(ff)
-
-	//fmt.Printf("%+v, %s", temp, ee)
+	aaa[share.CoverName("kkk")] = ddd
 
 }
 
-func tf1(temp []AffinityState) {
-	for _, info := range temp {
-		info.ttl = info.ttl - 1
+func integrateAffinity(newAffinityMgr map[string][]AffinityInfo) {
+	var (
+		raisePriorityMap = make(map[string][]AffinityInfo) // cover层、cover-view层有提升亲和性的列表
+		now              = time.Now().Unix()
+	)
+	for coverViewCacheKey, infos := range newAffinityMgr {
+		var (
+			coverName, viewName, _ = splitCoverViewCache(coverViewCacheKey)
+			coverViewKey           = appendCoverView(coverName, viewName)
+		)
+		// cover-view
+		coverViewAffinityInfos, exist := raisePriorityMap[coverViewKey]
+		if !exist {
+			coverViewAffinityInfos = make([]AffinityInfo, 0)
+		}
+		// cover
+		coverAffinityInfos, exist := raisePriorityMap[string(coverName)]
+		if !exist {
+			coverAffinityInfos = make([]AffinityInfo, 0)
+		}
+		for _, info := range infos {
+			if info.UsedWeight == 0 {
+				continue
+			}
+			// exp > 0 说明有亲和性
+			info.UsedWeight = 0
+			info.Priority = 1
+			if _, ok := existAffinityCardIp(info.CardIp, coverAffinityInfos); !ok {
+				coverAffinityInfos = append(coverAffinityInfos, info)
+			}
+			if _, ok := existAffinityCardIp(info.CardIp, coverViewAffinityInfos); !ok {
+				coverViewAffinityInfos = append(coverViewAffinityInfos, info)
+			}
+		}
+		raisePriorityMap[coverViewKey] = coverViewAffinityInfos
+		raisePriorityMap[string(coverName)] = coverAffinityInfos
 	}
-}
-func tf2(temp []AffinityState) {
-	for _, info := range temp {
-		info.ttl = info.ttl + 10
-	}
-}
-
-func testFunc5() {
-	temp := make([]*AffinityState, 0, 3)
-
-	aa := &AffinityState{
-		ipCard: "9.9.9.9",
-		ttl:    3,
-	}
-	bb := &AffinityState{
-		ipCard: "2.2.2.2",
-		ttl:    3,
-	}
-	cc := &AffinityState{
-		ipCard: "5.5.5.5",
-		ttl:    3,
-	}
-	temp = append(temp, aa, bb, cc)
-
-	cardIpToAbilityMap := make(map[string]*AffinityState, 3)
-	for _, ipAb := range temp {
-		cardIpToAbilityMap[ipAb.ipCard] = ipAb
-	}
-	affinityCardIps := []string{"2.2.2.2", "9.9.9.9"}
-	for _, ip := range affinityCardIps {
-		ipAb, ok := cardIpToAbilityMap[ip]
-		if !ok {
+	// 先将提升亲和性加入
+	for key, raiseInfos := range raisePriorityMap {
+		oldInfos, exist := globalAffinityMgr[key]
+		if !exist {
+			newAffinityMgr[key] = raiseInfos
 			continue
 		}
-		ipAb.ttl = 200
+		for _, raiseInfo := range raiseInfos {
+			if oldInfo, ok := existAffinityCardIp(raiseInfo.CardIp, oldInfos); ok {
+				raiseInfo.Priority = oldInfo.Priority + 1
+			}
+			newAffinityMgr[key] = append(newAffinityMgr[key], raiseInfo)
+		}
 	}
-	fmt.Printf("%+v", cardIpToAbilityMap)
-
-}
-func testFunc4() {
-	temp := make(map[string][]AffinityState)
-	testMapSave(temp)
-	testMapSave2(temp)
-
-	aa := AffinityState{
-		ipCard: "9.9.9.9",
-	}
-	testObjSave3(aa)
-	affinityMgr2 = temp
-	fmt.Printf("hhhhhhhhh %#v", temp)
-
-}
-
-func testObjSave3(aa AffinityState) {
-	aa.ipCard = "0"
-}
-
-func testMapSave(temp map[string][]AffinityState) {
-	temp["aa"] = append(temp["aa"], AffinityState{
-		ipCard: "1.2.3",
-	})
-}
-
-func testMapSave2(temp map[string][]AffinityState) {
-	temp["aa"] = append(temp["aa"], AffinityState{
-		ipCard: "2.2.2.2",
-	})
-	temp["bb"] = append(temp["bb"], AffinityState{
-		ipCard: "66666",
-	})
-}
-
-func testFunc3() (result map[string]*AffinityState) {
-	obj1 := &AffinityState{
-		ipCard: "1.1.1.1",
-		ttl:    100,
-	}
-	obj2 := &AffinityState{
-		ipCard: "2.2.2.2",
-		ttl:    200,
-	}
-	obj3 := &AffinityState{
-		ipCard: "3.3.3.3",
-		ttl:    300,
-	}
-	obj4 := &AffinityState{
-		ipCard: "4.4.4.4",
-		ttl:    400,
-	}
-	affinityMgr["adsdas"] = make([]*AffinityState, 0)
-
-	affinityMgr["aaa"] = []*AffinityState{
-		obj1,
-		obj4,
-		obj3,
-		obj2,
-	}
-	affinityMgr["bbb"] = []*AffinityState{
-		obj1,
-		obj3,
-		obj2,
-		obj4,
-	}
-	sort.Slice(affinityMgr["aaa"], func(i, j int) bool {
-		return affinityMgr["aaa"][i].ipCard > affinityMgr["aaa"][j].ipCard
-	})
-	for name := range affinityMgr {
-		sort.Slice(affinityMgr[name], func(i, j int) bool {
-			return affinityMgr[name][i].ipCard < affinityMgr[name][j].ipCard
-		})
-	}
-	affinities := make([]*AffinityState, 0)
-	for k, v := range affinityMgr {
-
-		for _, obj := range v {
-			if k == "aaa" {
-				o := obj
-				affinities = append(affinities, o)
+	// 再将降低亲和性加入
+	for key, oldInfos := range globalAffinityMgr {
+		newAffinityInfos, exist := newAffinityMgr[key]
+		if !exist {
+			newAffinityInfos = make([]AffinityInfo, 0)
+		}
+		for _, oldInfo := range oldInfos {
+			oldInfo.Priority--
+			// 亲和性优先级 < 最低阈值 || 超过存活时间未使用 则去除亲和性
+			if oldInfo.Priority < minAffinityPriorityThreshold || (now-int64(oldInfo.LastUsedTime)) > 300 {
+				continue
+			}
+			if _, ok := existAffinityCardIp(oldInfo.CardIp, newAffinityInfos); !ok {
+				newAffinityInfos = append(newAffinityInfos, oldInfo)
 			}
 		}
+		newAffinityMgr[key] = newAffinityInfos
 	}
-	for _, item := range affinityMgr["aaa"] {
-		if item.ipMap == nil {
-			item.ipMap = make(map[string][]string)
-		}
-		item.ipMap["aaa"] = append(item.ipMap["aaa"], "hahah")
-	}
-
-	modifyFunc(result)
-
-	aaa := fmt.Sprintf("输出map： %#v\n", affinities[0])
-	fmt.Printf(aaa)
-	fmt.Printf("输出map： %#v\n", affinities)
-
-	cacheMap["aa"] = append(cacheMap["aa"], "123")
-	cacheMap["bb"] = append(cacheMap["bb"], "456")
-
-	ccc := fmt.Sprintf("输出map2： %#v\n", affinityMgr)
-	fmt.Printf(ccc)
-
-	if len(affinityMgr) == 0 {
-		fmt.Printf("affinityMgr 长度为0")
-	}
-
-	if affinityStates, exist := affinityMgr["aaa"]; exist {
-		for _, state := range affinityStates {
-			fmt.Printf(state.ipCard)
+}
+func existAffinityCardIp(cardIp share.CardIp, infos []AffinityInfo) (AffinityInfo, bool) {
+	for _, item := range infos {
+		if item.CardIp == cardIp {
+			return item, true
 		}
 	}
-
-	var iPAbilitys []AffinityState
-	for _, ipAbList := range affinityMgr["aaa"] {
-
-		iPAbilitys = append(iPAbilitys, *ipAbList)
-		ipAbList.ttl = 666
+	return AffinityInfo{}, false
+}
+func case2() (newAffinityMgr map[string][]AffinityInfo) {
+	newAffinityMgr["cover1_:_view1_:_cache1"] = []AffinityInfo{
+		{
+			CardIp:     "ip1",
+			Priority:   2,
+			UsedWeight: 10,
+		},
+		{
+			CardIp:     "ip2",
+			Priority:   1,
+			UsedWeight: 10,
+		},
 	}
-	funxxx(iPAbilitys)
-	fmt.Printf("666")
-	fmt.Printf("%v\n", result)
-	return
-
-}
-
-func Infof(format string, v ...interface{}) {
-}
-
-func modifyFunc(result map[string]*AffinityState) {
-	result = make(map[string]*AffinityState)
-
-	result["aaa"] = &AffinityState{ipCard: "111"}
-	result["bbb"] = &AffinityState{ipCard: "222"}
-}
-
-func funxxx(abilitys []AffinityState) (result map[string][]*AffinityState) {
-	abilitys[0].ipCard = "hhhhhxxxx"
-
-	testArr := make(map[string][]*AffinityState)
-	hhh := make([]AffinityState, 0)
-	for _, ipAb := range abilitys {
-		newIPAbilities := ipAb
-		newIPAbilities.ttl = 112233
-		testArr["aaa"] = append(testArr["aaa"], &newIPAbilities)
-		hhh = append(hhh, newIPAbilities)
-
+	newAffinityMgr["cover1_:_view1_:_cache2"] = []AffinityInfo{
+		{
+			CardIp:     "ip2",
+			Priority:   0,
+			UsedWeight: 0,
+		},
+		{
+			CardIp:     "ip3",
+			Priority:   1,
+			UsedWeight: 10,
+		},
+		{
+			CardIp:     "ip4",
+			Priority:   1,
+			UsedWeight: 10,
+		},
 	}
-	delete(testArr, "aaa")
-	hhh[0].ttl = 6
-	return
-}
-
-func testFunc2() {
-	adjust := int64(1000)
-	bandwidth := int64(200)
-	dValue := adjust - bandwidth
-	lastDValue := int64(0)
-	floatingPercentage, _ := strconv.ParseFloat(fmt.Sprintf("%.3f", float64(dValue)/float64(lastDValue)), 64)
-	if dValue*lastDValue > 0 && (1-0.01) <= floatingPercentage && floatingPercentage <= (1+0.01) {
-		fmt.Printf("222")
-
+	newAffinityMgr["cover2_:_view1_:_cache3"] = []AffinityInfo{
+		{
+			CardIp:     "ip3",
+			Priority:   2,
+			UsedWeight: 10,
+		},
 	}
-	fmt.Printf("%f", 0.0211111111)
-
-}
-func testFunc() {
-	bw := int64(100)
-	adjustLine := int64(1000)
-	dValue := adjustLine - bw
-	ipWeightIncreaseRate := 5
-	ipWeightBaseRate := 1000
-	dTimes := dValue*5/adjustLine + 1
-	weight := dValue * (int64(ipWeightIncreaseRate)) / int64(ipWeightBaseRate) * dTimes
-	fmt.Printf(string(weight))
-
-	testMapFunc()
-	fmt.Printf("111")
-	//go func() {
-	//	eventsTick := time.NewTicker(time.Duration(1) * time.Second)
-	//	defer eventsTick.Stop()
-	//
-	//	for {
-	//		select {
-	//		case <-eventsTick.C:
-	//			//timerFunc()
-	//			//testMapFunc()
-	//		}
-	//	}
-	//}()
-}
-
-func testMapFunc() {
-	ip2one["aaa"] = 111
-	ip2one["bbb"] = 222
-	ip2second["ccc"] = 333
-	ip2second["ddd"] = 444
-	tempOne := make(map[string]int64)
-	tempTwo := make(map[string]int64)
-	for i := 0; i < 10; i++ {
-		tempOne[getRangString(5)] = int64(rand.Intn(10))
-		tempTwo[getRangString(5)] = int64(rand.Intn(10))
+	newAffinityMgr["cover2_:_view2_:_cache3"] = []AffinityInfo{
+		{
+			CardIp:     "ip4",
+			Priority:   2,
+			UsedWeight: 10,
+		},
 	}
-	ip2one = tempOne
-	ip2second = tempTwo
-}
-
-func timerFunc() {
-	for i := 0; i < 200; i++ {
-		randStr := getRangString(5)
-		randStr2 := getRangString(10)
-		one := ip2one[randStr]
-		two := ip2second[randStr2]
-		one++
-		one++
-		one = one + rand.Int63n(5)
-		two++
-		two++
-		two++
-		ip2one[randStr] = one
-		ip2second[randStr2] = two
-		fmt.Printf(randStr + ":" + string(one) + ":" + string(ip2one[randStr]))
-		fmt.Printf(randStr2 + ":" + string(two) + ":" + string(ip2second[randStr2]))
+	newAffinityMgr["cover2_:_view2_:_cache4"] = []AffinityInfo{
+		{
+			CardIp:     "ip1",
+			Priority:   2,
+			UsedWeight: 10,
+		},
 	}
-
+	return newAffinityMgr
 }
-
-func getRangString(length int) string {
-	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	b := make([]rune, length)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+func case1() map[string][]AffinityInfo {
+	newAffinityMgr := make(map[string][]AffinityInfo, 0)
+	newAffinityMgr["cover1_:_view1_:_cache1"] = []AffinityInfo{
+		{
+			CardIp:     "ip1",
+			Priority:   1,
+			UsedWeight: 10,
+		},
 	}
-	return string(b)
+	newAffinityMgr["cover1_:_view1_:_cache2"] = []AffinityInfo{
+		{
+			CardIp:     "ip2",
+			Priority:   1,
+			UsedWeight: 10,
+		},
+	}
+	newAffinityMgr["cover2_:_view1_:_cache3"] = []AffinityInfo{
+		{
+			CardIp:     "ip3",
+			Priority:   1,
+			UsedWeight: 10,
+		},
+	}
+	newAffinityMgr["cover2_:_view2_:_cache3"] = []AffinityInfo{
+		{
+			CardIp:     "ip4",
+			Priority:   1,
+			UsedWeight: 10,
+		},
+	}
+	newAffinityMgr["cover2_:_view2_:_cache4"] = []AffinityInfo{
+		{
+			CardIp:     "ip1",
+			Priority:   1,
+			UsedWeight: 10,
+		},
+	}
+	return newAffinityMgr
 }
 
-func Contains(array interface{}, val interface{}) bool {
-	targetValue := reflect.ValueOf(array)
-	switch reflect.TypeOf(array).Kind() {
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < targetValue.Len(); i++ {
-			if targetValue.Index(i).Interface() == val {
-				return true
+func splitCoverViewCache(key string) (share.CoverName, share.ViewName, share.CacheGroupName) {
+	values := strings.Split(key, coverViewCacheDelimiter)
+	return share.CoverName(values[0]), share.ViewName(values[1]), share.CacheGroupName(values[2])
+}
+
+func appendCoverView(coverName share.CoverName, viewName share.ViewName) string {
+	return strings.Join([]string{string(coverName), string(viewName)}, coverViewCacheDelimiter)
+}
+
+func compareAndInsertAffinity(currentMap map[string][]AffinityInfo,
+	coverViewMap map[string]map[share.CardIp]AffinityInfo,
+	raiseMap map[string]map[share.CardIp]AffinityInfo) {
+	for key, oldAffinityList := range globalAffinityMgr {
+		// 已经处理的不再处理
+		if _, ok := currentMap[key]; ok {
+			continue
+		}
+		var (
+			isRaise       = false                               // 当前key是否存在提升亲和性的列表
+			temRaiseIpMap = make(map[share.CardIp]AffinityInfo) // 需要提升亲和性的列表
+		)
+		for k, item := range raiseMap {
+			var (
+				coverName, viewName, _ = splitCoverViewCache(k)
+				coverViewKey           = appendCoverView(coverName, viewName)
+			)
+			if key == string(coverName) || key == coverViewKey {
+				isRaise = true
+				temRaiseIpMap = item
+				break
 			}
 		}
-	case reflect.Map:
-		if targetValue.MapIndex(reflect.ValueOf(val)).IsValid() {
-			return true
+		newAffinityIpInfoMap, exist := coverViewMap[key]
+		for _, oldItem := range oldAffinityList {
+			// 当前轮亲和性存在并且提升
+			if exist && isRaise {
+				// 当前cardIp亲和关系存在
+				if newItem, ok := newAffinityIpInfoMap[oldItem.CardIp]; ok {
+					// 当前cardIp在提升优先级列表中，亲和性+1
+					if _, ok2 := temRaiseIpMap[oldItem.CardIp]; ok2 {
+						currentMap[key] = append(currentMap[key], buildAffinityInfo(newItem, 0, oldItem.Priority+1))
+						continue
+					}
+				}
+			}
+			// 亲和性优先级 < 最低阈值 || 超过存活时间未使用 则去除亲和性
+			if oldItem.Priority < minAffinityPriorityThreshold || (time.Now().Unix()-int64(oldItem.LastUsedTime)) > 300 {
+				continue
+			}
+			// 降低亲和性-1
+			currentMap[key] = append(currentMap[key], buildAffinityInfo(oldItem, 0, oldItem.Priority-1))
 		}
 	}
-	return false
+}
+
+func buildAffinityInfo(item AffinityInfo, usedWeight, priority int64) AffinityInfo {
+	return AffinityInfo{
+		CardIp:       item.CardIp,
+		IpCard:       item.IpCard,
+		UsedWeight:   usedWeight,
+		Priority:     priority,
+		LastUsedTime: item.LastUsedTime,
+	}
 }

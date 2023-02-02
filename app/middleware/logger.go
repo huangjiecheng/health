@@ -12,7 +12,13 @@ import (
 	"time"
 )
 
-// 日志记录到文件
+func LoggerToConsole() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		fmt.Printf("LoggerToConsole huangjiecheng")
+	}
+}
+
+// LoggerToFile 日志记录到文件
 func LoggerToFile() gin.HandlerFunc {
 
 	logFilePath := config.LOG_PATH
@@ -49,6 +55,9 @@ func LoggerToFile() gin.HandlerFunc {
 
 		// 设置日志切割时间间隔(1天)
 		rotatelogs.WithRotationTime(24*time.Hour),
+
+		// 设置日志文件最大容量(100MB)
+		rotatelogs.WithRotationSize(100*1024*1024),
 	)
 
 	writeMap := lfshook.WriterMap{
@@ -103,21 +112,21 @@ func LoggerToFile() gin.HandlerFunc {
 	}
 }
 
-// 日志记录到 MongoDB
+// LoggerToMongo 日志记录到 MongoDB
 func LoggerToMongo() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 	}
 }
 
-// 日志记录到 ES
+// LoggerToES 日志记录到 ES
 func LoggerToES() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 	}
 }
 
-// 日志记录到 MQ
+// LoggerToMQ 日志记录到 MQ
 func LoggerToMQ() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
