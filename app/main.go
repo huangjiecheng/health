@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bt.baishancloud.com/resdev/y/util/file"
 	"fmt"
 	"github.com/robfig/cron/v3"
 	"health/router"
 	"health/share"
+	"health/util"
 	"strings"
 	"sync"
 	"time"
@@ -183,7 +185,47 @@ func (ib IpBasic) IsOk() bool {
 	return ib.Ip != "" && ib.SNode != ""
 }
 
+type RequestStat struct {
+	ReqNum  int64 `json:"req_num"`
+	Traffic int64 `json:"traffic"`
+}
+
+const (
+	dumpSMasterPath111 = "/Users/huangjiecheng/test_hjc11111.json"
+)
+
 func main() {
+
+	testFile()
+	var coverReqNumQueueMap sync.Map
+	exist := false
+	v, ok := coverReqNumQueueMap.Load("aaa")
+	if !ok {
+		// 24小时
+		limitQueue := util.NewLimitQueue(24)
+		coverReqNumQueueMap.Store("aaa", limitQueue)
+		v = limitQueue
+	}
+	limitQueue := v.(*util.LimitQueue)
+	limitQueue.RangeLimitQueue(func(value interface{}) {
+		var stat = value.(RequestStat)
+		stat.ReqNum += 222
+		exist = true
+	})
+	if !exist {
+		limitQueue.Set(RequestStat{
+			ReqNum: 11,
+		})
+	}
+	limitQueue.RangeLimitQueue(func(value interface{}) {
+		var stat = value.(RequestStat)
+		stat.ReqNum += 222
+		exist = true
+	})
+	limitQueue.RangeLimitQueue(func(value interface{}) {
+		var stat = value.(RequestStat)
+		fmt.Println(fmt.Sprintf("hhhh: %+v", stat))
+	})
 	//aaa := make(map[share.CoverName]map[share.CardIp]*IpBasic, 0)
 	//funxxx(aaa)
 	//newAffinityMgr := make(map[string][]AffinityInfo, 0) // 当前轮的亲和性列表
@@ -196,6 +238,16 @@ func main() {
 	})
 	c.Start()
 	router.Init()
+}
+
+func testFile() {
+	aaa := &RequestStat{
+		ReqNum: 123,
+	}
+	err := file.DumpFile(dumpSMasterPath111, aaa)
+	if err != nil {
+		fmt.Println(fmt.Sprintf("111111111111 err: %v", err))
+	}
 }
 
 func funxxx(aaa map[share.CoverName]map[share.CardIp]*IpBasic) {
