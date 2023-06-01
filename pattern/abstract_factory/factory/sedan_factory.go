@@ -1,8 +1,8 @@
 package factory
 
 import (
-	car2 "pattern/abstract_factory/car"
-	sedan2 "pattern/abstract_factory/car/sedan"
+	"pattern/abstract_factory/car"
+	"pattern/abstract_factory/car/sedan"
 )
 
 // SedanFactory 是轿车工厂类型
@@ -14,11 +14,11 @@ func NewSedanFactory() Factory {
 }
 
 // CreateEngine 创建轿车引擎
-func (f *SedanFactory) CreateEngine() car2.Engine {
-	return &sedan2.Engine{}
+func (f *SedanFactory) CreateEngine() car.Engine {
+	return &sedan.Engine{}
 }
 
 // CreateTire 创建轿车轮胎
-func (f *SedanFactory) CreateTire() car2.Tire {
-	return &sedan2.Tire{}
+func (f *SedanFactory) CreateTire() car.Tire {
+	return &sedan.Tire{}
 }
