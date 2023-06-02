@@ -1,11 +1,12 @@
-package abstract_factory
+package abstract_factory_pattern
 
 import (
 	"fmt"
-	factory2 "pattern/abstract_factory/factory"
+	factory2 "pattern/abstract_factory_pattern/factory"
 )
 
 func Start() {
+	fmt.Println("======抽象工厂模式启动======")
 	// 创建SUV工厂
 	suvFactory := factory2.NewSUVFactory()
 

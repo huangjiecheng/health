@@ -1,7 +1,7 @@
 package factory
 
 import (
-	"pattern/abstract_factory/car"
+	"pattern/abstract_factory_pattern/car"
 )
 
 // Factory 是抽象工厂接口，定义了创建引擎和轮胎的方法
