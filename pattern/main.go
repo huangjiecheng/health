@@ -7,9 +7,10 @@ import (
 )
 
 func main() {
+	singleton.Start()
+
 	abstract_factory_pattern.Start()
 
 	strategy_pattern.Start()
 
-	singleton.Start()
 }
