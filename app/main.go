@@ -3,7 +3,6 @@ package main
 import (
 	"bt.baishancloud.com/resdev/y/util/file"
 	"fmt"
-	"github.com/robfig/cron/v3"
 	"health/router"
 	"health/share"
 	"health/util"
@@ -19,6 +18,23 @@ type AffinityInfo struct {
 	Priority     int64
 	LastUsedTime int64
 	MapDemo      map[string]string
+	Hjc          Hjc
+}
+
+func (i *AffinityInfo) SetHjc() {
+	i.Hjc = Hjc{
+		Abc: 999,
+	}
+	i.Hjc.Ljj.Cde = 888
+}
+
+type Hjc struct {
+	Abc int
+	Ljj Ljj
+}
+
+type Ljj struct {
+	Cde int
 }
 
 type TrafficRespByBlb struct {
@@ -44,28 +60,7 @@ const (
 )
 
 var (
-	globalTraffic     sync.Map
 	globalAffinityMgr = make(map[string][]AffinityInfo, 0)
-	ip1               = AffinityInfo{
-		CardIp:     "ip1",
-		Priority:   0,
-		UsedWeight: 1,
-	}
-	ip2 = AffinityInfo{
-		CardIp:     "ip2",
-		Priority:   0,
-		UsedWeight: 0,
-	}
-	ip3 = AffinityInfo{
-		CardIp:     "ip3",
-		Priority:   0,
-		UsedWeight: 0,
-	}
-	ip4 = AffinityInfo{
-		CardIp:     "ip4",
-		Priority:   0,
-		UsedWeight: 0,
-	}
 )
 
 type (
@@ -194,50 +189,59 @@ const (
 	dumpSMasterPath111 = "/Users/huangjiecheng/test_hjc11111.json"
 )
 
-func main() {
+var (
+	ipBwLimitQueueMap sync.Map
+)
 
-	testFile()
-	var coverReqNumQueueMap sync.Map
-	exist := false
-	v, ok := coverReqNumQueueMap.Load("aaa")
+func main() {
+	aaaa := make(map[string]*util.ArrayList)
+	aaaa["k"] = util.NewArrayList(200)
+	ccc := aaaa["k"]
+	for i := 1; i < 10; i++ {
+		addIpBw("data", int64(i))
+	}
+	ggg("data")
+	for i := 0; i < 100; i++ {
+		a := int64(i)
+		go func() {
+			ccc.Append(a + 100)
+		}()
+	}
+	fmt.Println("ssss111111111: %v", aaaa)
+	router.Init()
+}
+
+func ggg(ipCard share.IpCard) {
+	v, ok := ipBwLimitQueueMap.Load(ipCard)
 	if !ok {
-		// 24小时
-		limitQueue := util.NewLimitQueue(24)
-		coverReqNumQueueMap.Store("aaa", limitQueue)
+		return
+	}
+	var (
+		limitQueue = v.(*util.LimitQueue)
+	)
+	// 遍历元素
+	limitQueue.RangeLimitQueue(func(value interface{}) {
+		var bw = value.(int64)
+		fmt.Println(fmt.Sprintf("11111111: %d", bw))
+	})
+}
+
+// addIpBw 添加ip带宽信息
+func addIpBw(ipCard share.IpCard, bw int64) {
+	v, ok := ipBwLimitQueueMap.Load(ipCard)
+	if !ok {
+		// 5个滑动周期 先写死
+		limitQueue := util.NewLimitQueue(10)
+		ipBwLimitQueueMap.Store(ipCard, limitQueue)
 		v = limitQueue
 	}
 	limitQueue := v.(*util.LimitQueue)
-	limitQueue.RangeLimitQueue(func(value interface{}) {
-		var stat = value.(RequestStat)
-		stat.ReqNum += 222
-		exist = true
-	})
-	if !exist {
-		limitQueue.Set(RequestStat{
-			ReqNum: 11,
-		})
-	}
-	limitQueue.RangeLimitQueue(func(value interface{}) {
-		var stat = value.(RequestStat)
-		stat.ReqNum += 222
-		exist = true
-	})
-	limitQueue.RangeLimitQueue(func(value interface{}) {
-		var stat = value.(RequestStat)
-		fmt.Println(fmt.Sprintf("hhhh: %+v", stat))
-	})
-	//aaa := make(map[share.CoverName]map[share.CardIp]*IpBasic, 0)
-	//funxxx(aaa)
-	//newAffinityMgr := make(map[string][]AffinityInfo, 0) // 当前轮的亲和性列表
-	//newAffinityMgr["cover1_:_view1_:_cache1"] = append(newAffinityMgr["cover1_:_view1_:_cache1"], ip1)
-	//integrateAffinity(newAffinityMgr)
-	c := cron.New(cron.WithSeconds())
-	_, _ = c.AddFunc("*/5 * * * * *", func() {
-		fmt.Printf("时间： %d, 准确: %s\n", time.Now().Unix(), time.Now().String())
-		fmt.Printf("五分钟前的时间：%d\n", ((time.Now().Unix()/60)-5)*60)
-	})
-	c.Start()
-	router.Init()
+	limitQueue.Set(bw)
+}
+
+func hjdsj(aaaa *AffinityInfo) {
+	aaaa.Hjc.Abc = 111
+	aaaa.Hjc.Ljj.Cde = 222
 }
 
 func testFile() {
