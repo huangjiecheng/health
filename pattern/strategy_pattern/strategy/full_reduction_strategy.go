@@ -5,6 +5,7 @@ type FullReductionStrategy struct {
 	Reduction float64
 }
 
+// CalculateDiscount 满减
 func (s *FullReductionStrategy) CalculateDiscount(amount float64, quantity int) float64 {
 	total := amount * float64(quantity)
 	reduceNum := total / s.Threshold

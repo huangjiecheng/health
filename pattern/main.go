@@ -12,5 +12,4 @@ func main() {
 	abstract_factory_pattern.Start()
 
 	strategy_pattern.Start()
-
 }
