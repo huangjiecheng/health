@@ -7,5 +7,5 @@ type Tire struct{}
 
 // Roll 实现了SUV轮胎的滚动方法
 func (t *Tire) Roll() {
-	fmt.Println("SUV轮胎滚动")
+	fmt.Println("【SUV】轮胎滚动")
 }
