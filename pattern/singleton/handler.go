@@ -25,10 +25,10 @@ func NewInstance(i int) *Instance {
 
 func Start() {
 	fmt.Println("======单例模式启动======")
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 30; i++ {
 		go func(x int) {
 			_ = NewInstance(x)
 		}(i)
 	}
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 }

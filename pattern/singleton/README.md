@@ -13,3 +13,5 @@
 sync.Once的主要原理是基于原子操作和互斥锁。它内部维护了一个done标志，用于记录函数是否已经执行过。当多个goroutine并发调用sync.Once的Do方法时，只有第一个goroutine会执行传递的函数，而其他的goroutine会被阻塞直到第一个goroutine执行完成。
 
 一旦第一个goroutine执行完成并且done标志被设置，后续的goroutine会直接跳过函数执行部分，从而实现只执行一次的效果。这样能够避免竞态条件（race condition）和其他并发问题。
+
+![img.png](img.png)
