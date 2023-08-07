@@ -16,10 +16,10 @@ var (
 func NewInstance(i int) *Instance {
 	once.Do(func() {
 		instance = &Instance{}
-		fmt.Println(fmt.Sprintf("index: %d 懒加载初始化", i))
+		fmt.Println(fmt.Sprintf("index: %d 懒加载首次初始化实例", i))
 
 	})
-	fmt.Println(fmt.Sprintf("index: %d 获取到旧的实例", i))
+	fmt.Println(fmt.Sprintf("index: %d 获取到唯一实例", i))
 	return instance
 }
 
