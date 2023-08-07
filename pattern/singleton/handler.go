@@ -25,7 +25,7 @@ func NewInstance(i int) *Instance {
 
 func Start() {
 	fmt.Println("======单例模式启动======")
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 20; i++ {
 		go func(x int) {
 			_ = NewInstance(x)
 		}(i)
