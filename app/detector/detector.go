@@ -43,7 +43,6 @@ func pingWorker(sourceIP, targetIP string, results chan<- PingResult, wg *sync.W
 		TargetIP: targetIP,
 		Stat:     stats,
 	}
-	fmt.Println(fmt.Sprintf("now: %d %+v", time.Now().Unix(), result.Stat))
 
 	results <- result
 }
@@ -68,6 +67,7 @@ func pingTargets(sourceIPs, targetIPs []string, results chan<- PingResult, numWo
 }
 
 func Start() {
+
 	sourceIPs := []string{"172.20.124.10"}                                                                                                                                                          // 你的源 IP 列表
 	targetIPs := []string{"172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32", "172.20.124.32"} // 你的目标 IP 列表
 
@@ -79,15 +79,9 @@ func Start() {
 
 	go pingTargets(sourceIPs, targetIPs, results, numWorkers, &wg)
 
+	for item := range results {
+		fmt.Println(fmt.Sprintf("sIp: %s tIp: %s res: %+v", item.SourceIP, item.TargetIP, item.Stat))
+	}
+
 	wg.Wait()
-	time.Sleep(100 * time.Second)
-	//ticker := time.NewTicker(4 * time.Second) // 定时任务，每隔4秒执行一次
-	//defer ticker.Stop()
-	//
-	//for {
-	//	select {
-	//	case <-ticker.C:
-	//		go pingTargets(sourceIPs, targetIPs, results, numWorkers, &wg)
-	//	}
-	//}
 }
